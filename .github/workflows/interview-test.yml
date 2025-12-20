@@ -1,0 +1,113 @@
+# GitHub Actions Workflow for Devvy Interview Tests
+#
+# This workflow should be placed in your template repository at:
+# .github/workflows/interview-test.yml
+#
+# It will automatically run when:
+# 1. A new interview session branch is created (interview-session-*)
+# 2. Code is committed to an interview branch
+# 3. Manually triggered via workflow_dispatch
+
+name: Interview Test
+
+on:
+  push:
+    branches:
+      - 'interview-session-*'
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: 'Devvy session ID'
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        id: test
+        continue-on-error: true
+        run: |
+          npm test > test-output.txt 2>&1
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          cat test-output.txt
+
+      - name: Post results to Devvy
+        if: always()
+        env:
+          DEVVY_API_URL: ${{ secrets.DEVVY_API_URL || 'http://localhost:3001' }}
+          SESSION_ID: ${{ github.event.inputs.session_id || github.ref_name }}
+        run: |
+          # Extract session ID from branch name if not provided
+          if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = "interview-session-*" ]; then
+            SESSION_ID=$(echo "${GITHUB_REF_NAME}" | sed 's/interview-session-//')
+          fi
+
+          # Determine success based on test exit code
+          SUCCESS="false"
+          if [ "${{ steps.test.outputs.exit_code }}" = "0" ]; then
+            SUCCESS="true"
+          fi
+
+          # Read test output
+          OUTPUT=$(cat test-output.txt)
+
+          # Calculate duration (approximate)
+          DURATION=${{ github.event.workflow_run.run_duration_ms || 0 }}
+
+          # Post results back to Devvy API
+          curl -X POST "${DEVVY_API_URL}/api/sessions/${SESSION_ID}/test-results" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"success\": ${SUCCESS},
+              \"output\": $(echo "$OUTPUT" | jq -Rs .),
+              \"duration\": ${DURATION},
+              \"commitSha\": \"${GITHUB_SHA}\"
+            }"
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-output.txt
+          retention-days: 7
+
+# Alternative for Python projects:
+#
+# - name: Setup Python
+#   uses: actions/setup-python@v5
+#   with:
+#     python-version: '3.11'
+#     cache: 'pip'
+#
+# - name: Install dependencies
+#   run: pip install -r requirements.txt
+#
+# - name: Run tests
+#   run: pytest > test-output.txt 2>&1
+
+# Alternative for Go projects:
+#
+# - name: Setup Go
+#   uses: actions/setup-go@v5
+#   with:
+#     go-version: '1.21'
+#     cache: true
+#
+# - name: Run tests
+#   run: go test ./... > test-output.txt 2>&1

@@ -50,12 +50,10 @@ jobs:
         if: always()
         env:
           DEVVY_API_URL: ${{ secrets.DEVVY_API_URL || 'http://localhost:3001' }}
-          SESSION_ID: ${{ github.event.inputs.session_id || github.ref_name }}
         run: |
-          # Extract session ID from branch name if not provided
-          if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = "interview-session-*" ]; then
-            SESSION_ID=$(echo "${GITHUB_REF_NAME}" | sed 's/interview-session-//')
-          fi
+          # Extract session ID from branch name (strip "interview-session-" prefix)
+          SESSION_ID="${GITHUB_REF_NAME#interview-session-}"
+          echo "Session ID: $SESSION_ID"
 
           # Determine success based on test exit code
           SUCCESS="false"
@@ -74,7 +72,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"success\": ${SUCCESS},
-              \"output\": $(echo "$OUTPUT" | jq -Rs .),
+              \"output\": $(echo \"$OUTPUT\" | jq -Rs .),
               \"duration\": ${DURATION},
               \"commitSha\": \"${GITHUB_SHA}\"
             }"
@@ -86,28 +84,3 @@ jobs:
           name: test-results
           path: test-output.txt
           retention-days: 7
-
-# Alternative for Python projects:
-#
-# - name: Setup Python
-#   uses: actions/setup-python@v5
-#   with:
-#     python-version: '3.11'
-#     cache: 'pip'
-#
-# - name: Install dependencies
-#   run: pip install -r requirements.txt
-#
-# - name: Run tests
-#   run: pytest > test-output.txt 2>&1
-
-# Alternative for Go projects:
-#
-# - name: Setup Go
-#   uses: actions/setup-go@v5
-#   with:
-#     go-version: '1.21'
-#     cache: true
-#
-# - name: Run tests
-#   run: go test ./... > test-output.txt 2>&1

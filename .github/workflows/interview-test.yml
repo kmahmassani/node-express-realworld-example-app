@@ -29,9 +29,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    env:
+      # Use webhook_url input if provided (from workflow_dispatch), otherwise fall back to secret
+      DEVVY_API_URL: ${{ inputs.webhook_url || secrets.DEVVY_API_URL || 'http://localhost:3001' }}
+      SESSION_ID: ${{ inputs.session_id }}
+
     steps:
+      - name: Set session ID from branch
+        if: ${{ !inputs.session_id }}
+        run: echo "SESSION_ID=${GITHUB_REF_NAME#interview-session-}" >> $GITHUB_ENV
+
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Notify: Installing dependencies
+        run: |
+          curl -sS -X POST "${DEVVY_API_URL}/api/sessions/${SESSION_ID}/test-progress" \
+            -H "Content-Type: application/json" \
+            -d '{"stage": "INSTALLING_DEPS"}' || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -42,27 +57,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Notify: Running tests
+        run: |
+          curl -sS -X POST "${DEVVY_API_URL}/api/sessions/${SESSION_ID}/test-progress" \
+            -H "Content-Type: application/json" \
+            -d '{"stage": "RUNNING_TESTS"}' || true
+
       - name: Run tests
         id: test
         continue-on-error: true
         run: |
-          npm test > test-output.txt 2>&1
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
-          cat test-output.txt
+          npm test 2>&1 | tee test-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
       - name: Post results to Devvy
         if: always()
-        env:
-          # Use webhook_url input if provided (from workflow_dispatch), otherwise fall back to secret
-          DEVVY_API_URL: ${{ inputs.webhook_url || secrets.DEVVY_API_URL || 'http://localhost:3001' }}
-          INPUT_SESSION_ID: ${{ inputs.session_id }}
         run: |
-          # Use session_id from input if available (workflow_dispatch), otherwise extract from branch name
-          if [ -n "$INPUT_SESSION_ID" ]; then
-            SESSION_ID="$INPUT_SESSION_ID"
-          else
-            SESSION_ID="${GITHUB_REF_NAME#interview-session-}"
-          fi
           echo "Session ID: $SESSION_ID"
           echo "Webhook URL: $DEVVY_API_URL"
 
@@ -72,11 +82,8 @@ jobs:
             SUCCESS="true"
           fi
 
-          # Read test output
-          OUTPUT=$(cat test-output.txt)
-
-          # Calculate duration (approximate)
-          DURATION=${{ github.event.workflow_run.run_duration_ms || 0 }}
+          # Read test output (preserve ANSI colors with cat)
+          OUTPUT=$(cat test-output.txt 2>/dev/null || echo "No test output available")
 
           # Post results back to Devvy API
           curl -X POST "${DEVVY_API_URL}/api/sessions/${SESSION_ID}/test-results" \
@@ -84,7 +91,7 @@ jobs:
             -d "{
               \"success\": ${SUCCESS},
               \"output\": $(echo "$OUTPUT" | jq -Rs .),
-              \"duration\": ${DURATION},
+              \"duration\": 0,
               \"commitSha\": \"${GITHUB_SHA}\"
             }"
 

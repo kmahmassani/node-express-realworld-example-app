@@ -20,6 +20,10 @@ on:
         description: 'Devvy session ID'
         required: true
         type: string
+      webhook_url:
+        description: 'Webhook URL to post results back to'
+        required: false
+        type: string
 
 jobs:
   test:
@@ -49,11 +53,18 @@ jobs:
       - name: Post results to Devvy
         if: always()
         env:
-          DEVVY_API_URL: ${{ secrets.DEVVY_API_URL || 'http://localhost:3001' }}
+          # Use webhook_url input if provided (from workflow_dispatch), otherwise fall back to secret
+          DEVVY_API_URL: ${{ inputs.webhook_url || secrets.DEVVY_API_URL || 'http://localhost:3001' }}
+          INPUT_SESSION_ID: ${{ inputs.session_id }}
         run: |
-          # Extract session ID from branch name (strip "interview-session-" prefix)
-          SESSION_ID="${GITHUB_REF_NAME#interview-session-}"
+          # Use session_id from input if available (workflow_dispatch), otherwise extract from branch name
+          if [ -n "$INPUT_SESSION_ID" ]; then
+            SESSION_ID="$INPUT_SESSION_ID"
+          else
+            SESSION_ID="${GITHUB_REF_NAME#interview-session-}"
+          fi
           echo "Session ID: $SESSION_ID"
+          echo "Webhook URL: $DEVVY_API_URL"
 
           # Determine success based on test exit code
           SUCCESS="false"
@@ -72,7 +83,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"success\": ${SUCCESS},
-              \"output\": $(echo \"$OUTPUT\" | jq -Rs .),
+              \"output\": $(echo "$OUTPUT" | jq -Rs .),
               \"duration\": ${DURATION},
               \"commitSha\": \"${GITHUB_SHA}\"
             }"
@@ -84,3 +95,28 @@ jobs:
           name: test-results
           path: test-output.txt
           retention-days: 7
+
+# Alternative for Python projects:
+#
+# - name: Setup Python
+#   uses: actions/setup-python@v5
+#   with:
+#     python-version: '3.11'
+#     cache: 'pip'
+#
+# - name: Install dependencies
+#   run: pip install -r requirements.txt
+#
+# - name: Run tests
+#   run: pytest > test-output.txt 2>&1
+
+# Alternative for Go projects:
+#
+# - name: Setup Go
+#   uses: actions/setup-go@v5
+#   with:
+#     go-version: '1.21'
+#     cache: true
+#
+# - name: Run tests
+#   run: go test ./... > test-output.txt 2>&1

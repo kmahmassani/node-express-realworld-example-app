@@ -42,7 +42,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Notify: Installing dependencies
+      - name: Notify - Installing dependencies
         run: |
           curl -sS -X POST "${DEVVY_API_URL}/api/sessions/${SESSION_ID}/test-progress" \
             -H "Content-Type: application/json" \
@@ -57,7 +57,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Notify: Running tests
+      - name: Notify - Running tests
         run: |
           curl -sS -X POST "${DEVVY_API_URL}/api/sessions/${SESSION_ID}/test-progress" \
             -H "Content-Type: application/json" \
